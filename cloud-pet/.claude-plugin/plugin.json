@@ -1,0 +1,6 @@
+{
+  "name": "cloud-pet",
+  "version": "0.1.0",
+  "description": "Pixel pet whose weather follows your context window; energy follows your 5h and weekly limits",
+  "types": "./types/index.d.ts"
+}

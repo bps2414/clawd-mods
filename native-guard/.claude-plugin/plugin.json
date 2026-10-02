@@ -1,0 +1,1 @@
+{ "name": "native-guard", "version": "0.1.0", "description": "Recusa edição de arquivo por sed -i / heredoc / python no shell e manda usar Edit e Write" }
