@@ -1,7 +1,7 @@
-// claude plugin test: the band draws a valid tree on both surfaces, idle and with a full sky (compact button)
+// claude plugin test: the band draws a valid tree on both surfaces
 import { expect, mock, test } from 'claude-code/testing'
 
-import { hudLines, setCompactAt, spendText } from './scene'
+import { CACHE_TTL, hudLines, setCompactAt, spendText } from './scene'
 
 const BAND = { plugin: 'cloud-pet', component: 'AbovePrompt', props: { hasSurvey: false, maxRows: 14, bodyColumns: 100 } } as const
 
@@ -11,7 +11,6 @@ test('band draws on terminal and desktop', async ($, on) => {
     const ui = await $.ui.mount({ ...BAND, surface })
     await ui.drawn()
     expect(await ui.find({ type: 'Text', text: /contexto/ })).toBeDefined()
-    expect(await ui.find({ key: 'compact' })).toBeUndefined()
     await ui.unmount()
   }
 })
@@ -46,5 +45,13 @@ test('what a turn took reads as cost and points of each window', async () => {
   expect(spendText({ cost: 0.42, five: 2, week: 0.31 })).toBe('+$0.42 · 5h +2.0% · sem +0.3%')
   expect(spendText({ cost: 0, five: 0 })).toBe('5h ~0%')
   setCompactAt(217_000, 250_000)
-  expect(hudLines({ tokens: 100_000 }, 'happy', 0, 0).join('\n')).toMatch(/100k\/250k[\s\S]*auto-compact em ~117k/)
+  expect(hudLines({ tokens: 100_000 }, 'happy', 0, 0).flat().join('\n')).toMatch(/100k\/250k[\s\S]*auto-compact em ~117k/)
+})
+
+test('the cache row counts down, warns, then says what the next message costs', () => {
+  const rows = (cacheLeft?: number) => hudLines({ tokens: 71_000 }, 'happy', 0, 0, { cacheLeft }).flat().join('\n')
+  expect(rows()).not.toMatch(/cache/)
+  expect(rows(CACHE_TTL)).toMatch(/cache +▰{10} 1h00/)
+  expect(rows(8 * 60_000)).toMatch(/cache[^\n]*8min\n +⚠ esfria logo/)
+  expect(rows(0)).toMatch(/cache +▱+ expirou\n +próxima msg relê ~71k[\s\S]*\/clear/)
 })

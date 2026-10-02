@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Day, PetUsage } from '../types'
-import { COMPACT_AT, WINDOW, setCompactAt, spendText, MOOD_ICON, PET_W, hudLines, moodFor, paintScene, petRect, span, squaresAt, toCells, toSvg, trackX, wanderX } from './scene'
+import { CACHE_TTL, COMPACT_AT, WINDOW, setCompactAt, spendText, MOOD_ICON, PET_W, hudLines, moodFor, paintScene, petRect, span, squaresAt, toCells, toSvg, trackX, wanderX } from './scene'
 import type { Scene, TaskPhase, TurnSpend } from './scene'
 
 const usage = atom({ plugin: 'cloud-pet', key: 'usage' } as const, { tokens: 0 } as PetUsage)
@@ -79,6 +79,12 @@ let wasDead = false
 let samples: { at: number; five: number }[] = []
 let fiveWarn: string | undefined
 let hasWarned = false
+
+// the prompt cache: any request keeps it warm for an hour, so the clock runs from the last sign of one
+let cacheAt: number | undefined // wall-clock ms; unknown until this session does something
+let cacheNote = 0 // 0 nothing said yet, 1 warned it is cooling, 2 said it went cold
+const touchCache = () => { cacheAt = Date.now(); cacheNote = 0 }
+const cacheLeft = () => (cacheAt === undefined ? undefined : Math.max(0, CACHE_TTL - (Date.now() - cacheAt)))
 
 const isDead = (u: PetUsage) => (u.five ?? 0) >= 100 || (u.week ?? 0) >= 100
 const moodNow = () => moodFor(
@@ -294,21 +300,21 @@ const step = ($: EngineInterface) => {
   if (Math.abs(goalX - petX) < 0.5) petX = goalX
   cam += (scroll + (petX - (size.W - PET_W) / 2) * 0.5 + (look ? (look.x - size.W / 2) * 0.2 : 0) - cam) * 0.15
 
-  const head = taskHead() ?? ''
+  const left = cacheLeft()
+  if (left !== undefined && !task) {
+    if (left === 0 && cacheNote < 2) {
+      cacheNote = 2
+      $.ui.toast(`Clawd: cache esfriou · a próxima msg relê ~${Math.round(latest.tokens / 1000)}k tokens`, { timeoutMs: 12000 })
+    } else if (left > 0 && left <= 5 * 60_000 && cacheNote < 1) {
+      cacheNote = 1
+      $.ui.toast(`Clawd: cache esfria em ~${span(left)}`, { timeoutMs: 8000 })
+    }
+  }
+
+  const head = `${taskHead() ?? ''}|${left === undefined ? '' : Math.ceil(left / 60_000)}` // the cache row ticks by the minute
   if (head !== lastHead) {
     lastHead = head
     $.ui.invalidate('ui.render')
-  }
-}
-
-/** The compact button's press: says it heard, compacts (the call /compact itself makes), and says why when it could not. */
-const compactNow = async ($: EngineInterface) => {
-  $.ui.toast('Clawd: compactando…')
-  try {
-    const { skip } = await $.session.compact()
-    if (skip) $.ui.toast(`Clawd: compactação recusada (${skip.slice(0, 80)})`, { timeoutMs: 9000 })
-  } catch (err) {
-    $.ui.toast(`Clawd: não consegui compactar (${String(err).slice(0, 80)})`, { timeoutMs: 9000 })
   }
 }
 
@@ -330,15 +336,21 @@ export const register: Register = on => {
     void pollLimits($).then(() => poll($))
     $.clock.every(5000, () => void poll($))
     $.clock.every(60_000, () => void pollLimits($))
+    let isBlitting = false // a blit still in flight: its tick is skipped, so a slow terminal never queues frames
     $.clock.every(TICK, async () => {
       step($)
       if (isHidden) return
       if (isTerminal && bandId) {
-        const r = await $.ui.blit({ requestId: bandId, key: 'scene', cells: toCells(scene(), size.W, size.PH) })
-        if (r.deny) $.ui.invalidate('ui.render')
-      } else if (!isTerminal && (task || frame % 4 === 0)) {
-        // a redraw replaces the Button, and a click that straddles one is lost: at rest the desktop draws every 600ms
-        $.ui.invalidate('ui.render')
+        if (isBlitting) return
+        isBlitting = true
+        try {
+          const r = await $.ui.blit({ requestId: bandId, key: 'scene', cells: toCells(scene(), size.W, size.PH) })
+          if (r.deny) $.ui.invalidate('ui.render')
+        } finally {
+          isBlitting = false
+        }
+      } else if (!isTerminal) {
+        $.ui.invalidate('ui.render') // the desktop has no blit: every frame is a redraw (the engine folds them to 30 a second)
       }
     })
 
@@ -381,6 +393,7 @@ export const register: Register = on => {
   // a turn begins: the pet steps onto the track
   on('turn.start', ($, e, next) => {
     const mine = begin(e.turnId)
+    touchCache()
     // the windows are read once a minute: a fresh reading now, so the turn is not billed the minute before it
     void pollLimits($).then(() => { mine.five0 = remote?.five ?? mine.five0; mine.week0 = remote?.week ?? mine.week0 })
 
@@ -394,6 +407,7 @@ export const register: Register = on => {
     if (!mine) return next(e) // a background agent outliving its turn is no turn of its own
     mine.steps++
     mine.lastAt = Date.now()
+    touchCache()
     mine.tool = doing(e)
     const isAsking = e.tool === 'AskUserQuestion'
     const timer = isAsking ? $.clock.after(ASK_RING_MS, () => void ring($, ASK, 'Clawd precisa de você')) : undefined
@@ -409,6 +423,7 @@ export const register: Register = on => {
     } finally {
       if (isAsking) mine.asks--
       mine.lastAt = Date.now()
+      touchCache() // the next model request follows a tool result
       timer?.cancel()
     }
   })
@@ -423,6 +438,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId !== undefined) return done // a subagent's run is a step of the turn, not its end
+    touchCache() // the last request of the turn is the one that kept it warm
 
     // from here on nothing may throw: a failed hook is skipped, and the engine would run the rest of the chain again
     try {
@@ -522,7 +538,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { hasSurvey, maxRows, bodyColumns } = e.props
-    const rows = Math.min(10, maxRows - 2)
+    const rows = Math.min(12, maxRows - 2)
     if (isHidden || hasSurvey || rows < 6) return next(e)
 
     const u = await read($, usage)
@@ -530,22 +546,24 @@ export const register: Register = on => {
     const count = today.compacts // the day's, every session's, as the line says
     const now = await $.clock.now()
     const mood = moodNow()
-    const lines = hudLines(u, mood, now, count, { task: taskHead(), fiveWarn, last: lastSpend, today: today.cost })
-    if (sayLeft > 0) lines[0] = say
-    // nothing running and something worth compacting: the compaction is one press away
-    const canCompact = !task && mood !== 'dead' && u.tokens >= 20_000 && u.tokens < COMPACT_AT
+    const groups = hudLines(u, mood, now, count, { task: taskHead(), fiveWarn, last: lastSpend, today: today.cost, cacheLeft: cacheLeft() })
+    if (sayLeft > 0) groups[0] = [say]
+    const lines = groups.flat()
     const hasSide = bodyColumns >= 64
     const W = hasSide ? clamp(bodyColumns - 36, 24, 44) : clamp(bodyColumns - 2, 20, 44)
     size = { W, PH: rows * 2 }
     bandId = e.requestId
 
-    const HUD = (Text: any, Button: any) => [
-      ...lines.slice(0, canCompact ? rows - 1 : rows).map((line, i) => <Text bold={i === 0} dimColor={i > 1}>{line}</Text>),
-      canCompact && <Button key="compact" label={`compactar agora (${Math.round(u.tokens / 1000)}k)`} onPress={() => void compactNow($)} />,
-    ]
+    // groups are told apart by a blank row when the card has room, else they run together; rows with a two-space indent are the dim sub-lines
+    const room = Math.max(rows, maxRows - 2)
+    const gaps = lines.length + groups.length - 1 <= room
+    const HUD = (Text: any) => groups.flatMap((g, gi) => [
+      ...(gaps && gi > 0 ? [<Text key={`gap${gi}`}> </Text>] : []),
+      ...g.map(line => <Text bold={gi === 0} dimColor={line.startsWith('  ')}>{line}</Text>),
+    ]).slice(0, room)
 
     if (e.surface === 'terminal') {
-      const { Box, Text, Button, Raster, Client } = $.ui.resolve(e)
+      const { Box, Text, Raster, Client } = $.ui.resolve(e)
       isTerminal = true
 
       return (
@@ -557,20 +575,20 @@ export const register: Register = on => {
                 <Client key="hit" module="./hit.tsx" width={size.W} height={rows} props={{ columns: size.W, rows }} />
               </Box>
             </Box>
-            {hasSide && <Box flexDirection="column" marginLeft={2} justifyContent="center">{HUD(Text, Button)}</Box>}
+            {hasSide && <Box flexDirection="column" marginLeft={2} justifyContent="center">{HUD(Text)}</Box>}
           </Box>
           {!hasSide && <Text dimColor>{lines[0]} · {Math.round(u.tokens / 1000)}k/{Math.round(WINDOW / 1000)}k</Text>}
         </Box>
       )
     }
 
-    const { Box, Text, Button, Svg } = $.ui.resolve(e)
+    const { Box, Text, Svg } = $.ui.resolve(e)
     isTerminal = false
 
     return (
       <Box flexDirection="row">
         <Svg source={toSvg(scene(), size.W, size.PH)} alt="Clawd and the weather" width={size.W * 7} />
-        <Box flexDirection="column" marginLeft={2}>{HUD(Text, Button)}</Box>
+        <Box flexDirection="column" marginLeft={2}>{HUD(Text)}</Box>
       </Box>
     )
   })

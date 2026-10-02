@@ -52,19 +52,22 @@ O texto vem dos argumentos da chamada de tool (o campo `description` que o agent
 
 As outras linhas:
 
+Em três blocos (status, sessão, conta), separados por linha em branco quando há altura:
+
 ```
 contexto   ▰▰▰▱▱▱▱▱▱▱ 70k/250k
-auto-compact em ~147k · 2× hoje
+  auto-compact em ~147k · 2× hoje
+cache      ▰▰▰▰▰▰▰▱▱▱ 42min
+
 energia 5h ♥♥♥♡♡ 34% · reseta em 2h45
 semana     ▰▱▱▱▱▱▱▱▱▱ 5%
 custo      $0.43 · hoje $1.80
-último     +$0.12 · 5h +2.0% · sem +0.3%
-[ compactar agora (70k) ]
+  último   +$0.12 · 5h +2.0% · sem +0.3%
 ```
 
+- **Cache** = contagem de 60 min do cache de prompt, renovada a cada passo do agente. Com ≤10 min avisa `⚠ esfria logo`; com ≤5 min toast; ao expirar mostra quantos tokens a próxima mensagem vai reler e sugere compactar ou `/clear`. Ajuste `CACHE_TTL` em `scene.ts` se sua conta usar o cache de 5 min.
 - **Energia** = seu limite de 5h. Se ele acabar (ou o da semana), o Clawd morre e vira lápide. x_x
 - **Sentinela**: se no ritmo dos últimos 20 minutos o limite de 5h vai acabar antes do reset, aparece `⚠ acaba em ~35min` e um aviso quando faltar menos de 20.
-- **Botão `compactar agora`** aparece quando não tem turno rodando.
 - **Linha `último`**: o que o último turno gastou em dólar e em pontos da quota de 5h e da semanal (a quota é da conta: outras sessões rodando junto entram na conta).
 
 ### O que o Clawd fala
@@ -138,7 +141,7 @@ claude --plugin-dir /caminho/clawd-mods/cloud-pet
 - **Rede**: o cloud-pet consulta `api.anthropic.com/api/oauth/usage` com a credencial da própria sessão pra ler os limites de 5h e da semana. É um endpoint não documentado; se ele mudar, a energia cai pros números que a sessão já tem. Nenhum outro mod acessa a rede.
 - **Dados**: tudo fica local (o diário no armazenamento do plugin, o board em `~/.claude/session-board/`). O board guarda os primeiros 60 caracteres do seu último prompt.
 - **Sem evento de permissão**: quando o Claude Code pede autorização pra uma tool, o HUD não sabe; só perguntas do agente viram `✋`.
-- **Verificado**: `claude plugin validate` nos quatro e `claude plugin test cloud-pet` (2 testes). Som no Windows e o botão de compactar no app desktop ainda não foram confirmados.
+- **Verificado**: `claude plugin validate` nos quatro e `claude plugin test cloud-pet` (4 testes). Som no Windows ainda não foi confirmado.
 
 ## Desenvolver
 

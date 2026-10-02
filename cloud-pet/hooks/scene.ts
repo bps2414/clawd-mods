@@ -84,7 +84,14 @@ export type HudExtra = {
   last?: TurnSpend
   /** what today cost so far across sessions, USD */
   today?: number
+  /** ms until the prompt cache goes cold; undefined when no request was seen yet */
+  cacheLeft?: number
 }
+
+/** How long the prompt cache lives after the last request (the 1h tier). */
+export const CACHE_TTL = 60 * 60_000
+/** From here on the HUD warns that the cache is about to go cold. */
+export const CACHE_WARN = 10 * 60_000
 
 export type TurnSpend = { cost?: number; five?: number; week?: number }
 
@@ -97,7 +104,23 @@ export const spendText = (s: TurnSpend) => [
   s.week !== undefined && `sem ${pts(s.week)}`,
 ].filter(Boolean).join(' · ')
 
-export const hudLines = (u: PetUsage, mood: Mood, now: number, compacts: number, x: HudExtra = {}): string[] => {
+/** The cache countdown and, when it is close or gone, what to do about it. Rows starting with two spaces are sub-lines. */
+const cacheRows = (u: PetUsage, left: number | undefined): string[] => {
+  if (left === undefined) return []
+  if (left > 0) {
+    const row = `cache      ${bar((left / CACHE_TTL) * 100)} ${span(left)}`
+    return left > CACHE_WARN ? [row] : [row, '  ⚠ esfria logo: mande algo p/ manter']
+  }
+
+  return [
+    'cache      ▱▱▱▱▱▱▱▱▱▱ expirou',
+    u.tokens >= 10_000 ? `  próxima msg relê ~${k(u.tokens)} tokens` : '  contexto pequeno, relê barato',
+    ...(u.tokens >= 40_000 ? ['  vai seguir? compacte · outro assunto? /clear'] : []),
+  ]
+}
+
+/** The HUD as groups of rows (head / this session / the account), so the card can breathe between them. Rows starting with two spaces are sub-lines. */
+export const hudLines = (u: PetUsage, mood: Mood, now: number, compacts: number, x: HudExtra = {}): string[][] => {
   const t = clamp(u.tokens / COMPACT_AT, 0, 1)
   const left = COMPACT_AT - u.tokens
   const compact = mood === 'cheer' && !x.task ? '✨ contexto limpinho, bora de novo'
@@ -114,15 +137,20 @@ export const hudLines = (u: PetUsage, mood: Mood, now: number, compacts: number,
   const last = x.last && spendText(x.last)
 
   return [
-    head,
-    `contexto   ${bar(t * 100)} ${k(u.tokens)}/${k(WINDOW)}`,
-    compacts > 0 ? `${compact} · ${compacts}× hoje` : compact,
-    u.five === undefined
-      ? 'energia 5h ♡♡♡♡♡ sem leitura ainda'
-      : `energia 5h ${hearts(u.five)} ${Math.round(u.five)}%${x.fiveWarn ?? eta(u.fiveResets, now)}`,
-    u.week === undefined ? 'semana     ▱▱▱▱▱▱▱▱▱▱ —' : `semana     ${bar(u.week)} ${Math.round(u.week)}%`,
-    ...cost,
-    ...(last ? [`último     ${last}`] : []),
+    [head],
+    [
+      `contexto   ${bar(t * 100)} ${k(u.tokens)}/${k(WINDOW)}`,
+      `  ${compacts > 0 ? `${compact} · ${compacts}× hoje` : compact}`,
+      ...cacheRows(u, x.cacheLeft),
+    ],
+    [
+      u.five === undefined
+        ? 'energia 5h ♡♡♡♡♡ sem leitura ainda'
+        : `energia 5h ${hearts(u.five)} ${Math.round(u.five)}%${x.fiveWarn ?? eta(u.fiveResets, now)}`,
+      u.week === undefined ? 'semana     ▱▱▱▱▱▱▱▱▱▱ —' : `semana     ${bar(u.week)} ${Math.round(u.week)}%`,
+      ...cost,
+      ...(last ? [`  último   ${last}`] : []),
+    ],
   ]
 }
 
