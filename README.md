@@ -12,7 +12,7 @@ O Clawd fica numa faixa acima do prompt, com um painel de números do lado.
 
 ### O céu é o seu contexto
 - **Clima = quanto do contexto já foi usado.** Céu limpo no começo, nuvens juntando, chuva, e tempestade com raio quando o auto-compact está chegando. Ele abre um guarda-chuva sozinho.
-- **O limite é o seu de verdade.** O mod lê o limiar de auto-compact da sessão (respeita `autoCompactWindow`), não um 200k fixo.
+- **O limite é o seu de verdade.** O mod lê o limiar de auto-compact da sessão (respeita `autoCompactWindow`), não um 200k fixo. O HUD mostra tokens contra a janela (`250k`); o auto-compact dispara uma reserva antes (~217k), e é isso que a linha `auto-compact em ~X` conta.
 - **Chuva só cai de nuvem.** Com vento, respingo e pocinha no chão.
 - **Compactou?** Arco-íris, confete e o Clawd comemora.
 
@@ -53,17 +53,19 @@ O texto vem dos argumentos da chamada de tool (o campo `description` que o agent
 As outras linhas:
 
 ```
-contexto   ▰▰▰▱▱▱▱▱▱▱ 70k/217k
+contexto   ▰▰▰▱▱▱▱▱▱▱ 70k/250k
 auto-compact em ~147k · 2× hoje
 energia 5h ♥♥♥♡♡ 34% · reseta em 2h45
 semana     ▰▱▱▱▱▱▱▱▱▱ 5%
-custo      $0.43 (+$0.12) · hoje $1.80
+custo      $0.43 · hoje $1.80
+último     +$0.12 · 5h +2.0% · sem +0.3%
 [ compactar agora (70k) ]
 ```
 
 - **Energia** = seu limite de 5h. Se ele acabar (ou o da semana), o Clawd morre e vira lápide. x_x
 - **Sentinela**: se no ritmo dos últimos 20 minutos o limite de 5h vai acabar antes do reset, aparece `⚠ acaba em ~35min` e um aviso quando faltar menos de 20.
 - **Botão `compactar agora`** aparece quando não tem turno rodando.
+- **Linha `último`**: o que o último turno gastou em dólar e em pontos da quota de 5h e da semanal (a quota é da conta: outras sessões rodando junto entram na conta).
 
 ### O que o Clawd fala
 Clique nele (no terminal):

@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Day, PetUsage } from '../types'
-import { COMPACT_AT, setCompactAt, MOOD_ICON, PET_W, hudLines, moodFor, paintScene, petRect, span, squaresAt, toCells, toSvg, trackX, wanderX } from './scene'
-import type { Scene, TaskPhase } from './scene'
+import { COMPACT_AT, WINDOW, setCompactAt, spendText, MOOD_ICON, PET_W, hudLines, moodFor, paintScene, petRect, span, squaresAt, toCells, toSvg, trackX, wanderX } from './scene'
+import type { Scene, TaskPhase, TurnSpend } from './scene'
 
 const usage = atom({ plugin: 'cloud-pet', key: 'usage' } as const, { tokens: 0 } as PetUsage)
 const compacts = atom({ plugin: 'cloud-pet', key: 'compacts' } as const, 0)
@@ -52,6 +52,8 @@ type Task = {
   fresh: number
   end: number // frames the finished bar stays before it fades away
   cost0?: number
+  five0?: number
+  week0?: number
   summary?: string
 }
 const END_FRAMES = 30
@@ -70,7 +72,7 @@ let tzMin = -new Date().getTimezoneOffset() // /pet fuso N overrides, should the
 const NO_DAY: Day = { turns: 0, secs: 0, cost: 0, compacts: 0, deaths: 0 }
 let today: Day = NO_DAY
 let todayKey = ''
-let lastCost: number | undefined
+let lastSpend: TurnSpend | undefined
 let isMuted = false
 let wasDead = false
 // the limit sentinel: recent readings of the 5h window, to project when it runs out
@@ -194,9 +196,10 @@ const stats = async ($: EngineInterface) => {
 
 /** Where this session really auto-compacts (the person's autoCompactWindow setting), estimated locally at no cost. */
 const pollThreshold = async ($: EngineInterface) => {
-  const at = (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context.breakdown?.autoCompactThreshold
-  if (typeof at === 'number' && at > 0 && at !== COMPACT_AT) {
-    setCompactAt(at)
+  const b = (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context.breakdown
+  const at = b?.autoCompactThreshold
+  if (typeof at === 'number' && at > 0 && (at !== COMPACT_AT || b!.rawMaxTokens !== WINDOW)) {
+    setCompactAt(at, b!.rawMaxTokens)
     lastKey = ''
     $.ui.invalidate('ui.render')
   }
@@ -252,12 +255,12 @@ const poll = async ($: EngineInterface) => {
   watchLimit($, next)
   if (isDead(next) && !wasDead) void bumpDay($, d => { d.deaths++ }).catch(() => undefined)
   wasDead = isDead(next)
-  const key = JSON.stringify(next) + (fiveWarn ?? '') + COMPACT_AT
+  const key = JSON.stringify(next) + (fiveWarn ?? '') + COMPACT_AT + WINDOW
   if (key === lastKey) return
   lastKey = key
   await update($, usage, () => next)
   const left = Math.max(0, COMPACT_AT - next.tokens)
-  $.ui.status(`${MOOD_ICON[moodNow()]} ${Math.round(next.tokens / 1000)}k/${Math.round(COMPACT_AT / 1000)}k · compact em ${Math.round(left / 1000)}k${next.five === undefined ? '' : ` · 5h ${Math.round(next.five)}%`}`)
+  $.ui.status(`${MOOD_ICON[moodNow()]} ${Math.round(next.tokens / 1000)}k/${Math.round(WINDOW / 1000)}k · compact em ${Math.round(left / 1000)}k${next.five === undefined ? '' : ` · 5h ${Math.round(next.five)}%`}`)
 }
 
 /** One frame of everything that moves. */
@@ -298,14 +301,14 @@ const step = ($: EngineInterface) => {
   }
 }
 
-/** The compact button's press: says it heard, runs /compact, and says why when it could not. */
+/** The compact button's press: says it heard, compacts (the call /compact itself makes), and says why when it could not. */
 const compactNow = async ($: EngineInterface) => {
   $.ui.toast('Clawd: compactando…')
   try {
-    await $.command.run({ command: 'compact', args: '' })
+    const { skip } = await $.session.compact()
+    if (skip) $.ui.toast(`Clawd: compactação recusada (${skip.slice(0, 80)})`, { timeoutMs: 9000 })
   } catch (err) {
-    // the command call was refused here: the same thing typed as a prompt
-    await $.prompt.submit({ text: '/compact' }).catch(() => $.ui.toast(`Clawd: não consegui compactar (${String(err).slice(0, 80)})`, { timeoutMs: 9000 }))
+    $.ui.toast(`Clawd: não consegui compactar (${String(err).slice(0, 80)})`, { timeoutMs: 9000 })
   }
 }
 
@@ -333,7 +336,8 @@ export const register: Register = on => {
       if (isTerminal && bandId) {
         const r = await $.ui.blit({ requestId: bandId, key: 'scene', cells: toCells(scene(), size.W, size.PH) })
         if (r.deny) $.ui.invalidate('ui.render')
-      } else if (!isTerminal) {
+      } else if (!isTerminal && (task || frame % 4 === 0)) {
+        // a redraw replaces the Button, and a click that straddles one is lost: at rest the desktop draws every 600ms
         $.ui.invalidate('ui.render')
       }
     })
@@ -367,7 +371,7 @@ export const register: Register = on => {
   })
 
   const begin = (turnId?: string) => {
-    task = { turnId, phase: 'work', asks: 0, steps: 0, startAt: Date.now(), lastAt: Date.now(), tool: '', errs: [], squares: 0, fresh: 99, end: END_FRAMES, cost0: latest.cost }
+    task = { turnId, phase: 'work', asks: 0, steps: 0, startAt: Date.now(), lastAt: Date.now(), tool: '', errs: [], squares: 0, fresh: 99, end: END_FRAMES, cost0: latest.cost, five0: latest.five, week0: latest.week }
     progress = 0
     float = undefined
 
@@ -376,7 +380,9 @@ export const register: Register = on => {
 
   // a turn begins: the pet steps onto the track
   on('turn.start', ($, e, next) => {
-    begin(e.turnId)
+    const mine = begin(e.turnId)
+    // the windows are read once a minute: a fresh reading now, so the turn is not billed the minute before it
+    void pollLimits($).then(() => { mine.five0 = remote?.five ?? mine.five0; mine.week0 = remote?.week ?? mine.week0 })
 
     return next(e)
   })
@@ -438,7 +444,16 @@ export const register: Register = on => {
         }
       }
       if (isOk) {
-        lastCost = spent >= 0.005 ? spent : undefined
+        lastSpend = { cost: spent }
+        // what it took of the 5h and weekly windows, once Anthropic's own count has it; the account's other sessions count in too
+        const gone = (now?: number, was?: number) => (now !== undefined && was !== undefined && now >= was ? now - was : undefined)
+        const mark = lastSpend
+        void pollLimits($).then(() => poll($)).then(() => {
+          mark.five = gone(latest.five, mine?.five0)
+          mark.week = gone(latest.week, mine?.week0)
+          if (mine?.summary && (mark.five !== undefined || mark.week !== undefined)) mine.summary = `✓ ${took} · ${spendText(mark)}`
+          $.ui.invalidate('ui.render')
+        }).catch(() => undefined)
         void bumpDay($, d => { d.turns++; d.secs += Math.round(e.durationMs / 1000); d.cost += spent }).catch(() => undefined)
         if (e.durationMs >= LONG_TURN_MS) {
           $.ui.toast(`Clawd: pronto em ${took}${spent >= 0.005 ? ` (+$${spent.toFixed(2)})` : ''}`, { timeoutMs: 8000 })
@@ -515,7 +530,7 @@ export const register: Register = on => {
     const count = today.compacts // the day's, every session's, as the line says
     const now = await $.clock.now()
     const mood = moodNow()
-    const lines = hudLines(u, mood, now, count, { task: taskHead(), fiveWarn, last: lastCost, today: today.cost })
+    const lines = hudLines(u, mood, now, count, { task: taskHead(), fiveWarn, last: lastSpend, today: today.cost })
     if (sayLeft > 0) lines[0] = say
     // nothing running and something worth compacting: the compaction is one press away
     const canCompact = !task && mood !== 'dead' && u.tokens >= 20_000 && u.tokens < COMPACT_AT
@@ -544,7 +559,7 @@ export const register: Register = on => {
             </Box>
             {hasSide && <Box flexDirection="column" marginLeft={2} justifyContent="center">{HUD(Text, Button)}</Box>}
           </Box>
-          {!hasSide && <Text dimColor>{lines[0]} · {Math.round(u.tokens / 1000)}k/{Math.round(COMPACT_AT / 1000)}k</Text>}
+          {!hasSide && <Text dimColor>{lines[0]} · {Math.round(u.tokens / 1000)}k/{Math.round(WINDOW / 1000)}k</Text>}
         </Box>
       )
     }

@@ -2,7 +2,9 @@ import type { PetUsage } from '../types'
 
 /** Where auto-compact fires: the weather is tokens / COMPACT_AT, the full storm. 200k until the session says its own. */
 export let COMPACT_AT = 200_000
-export const setCompactAt = (tokens: number) => { COMPACT_AT = tokens }
+/** The compaction window itself (autoCompactWindow): what the HUD shows tokens against. Auto-compact fires a reserve short of it. */
+export let WINDOW = 200_000
+export const setCompactAt = (tokens: number, window = tokens) => { COMPACT_AT = tokens; WINDOW = Math.max(tokens, window) }
 
 export type Mood = 'happy' | 'calm' | 'worried' | 'sad' | 'cry' | 'dead' | 'cheer' | 'poked' | 'dizzy'
 
@@ -78,11 +80,22 @@ export type HudExtra = {
   task?: string
   /** the limit sentinel's warning; takes the reset countdown's place */
   fiveWarn?: string
-  /** what the last turn cost, USD */
-  last?: number
+  /** what the last turn took: USD and points of each limit window */
+  last?: TurnSpend
   /** what today cost so far across sessions, USD */
   today?: number
 }
+
+export type TurnSpend = { cost?: number; five?: number; week?: number }
+
+const pts = (n: number) => (n < 0.05 ? '~0%' : `+${n < 10 ? n.toFixed(1) : Math.round(n)}%`)
+
+/** "+$0.42 · 5h +2.0% · sem +0.3%": what one turn took, the parts there is a reading for. */
+export const spendText = (s: TurnSpend) => [
+  s.cost !== undefined && s.cost >= 0.005 && `+$${s.cost.toFixed(2)}`,
+  s.five !== undefined && `5h ${pts(s.five)}`,
+  s.week !== undefined && `sem ${pts(s.week)}`,
+].filter(Boolean).join(' · ')
 
 export const hudLines = (u: PetUsage, mood: Mood, now: number, compacts: number, x: HudExtra = {}): string[] => {
   const t = clamp(u.tokens / COMPACT_AT, 0, 1)
@@ -97,17 +110,19 @@ export const hudLines = (u: PetUsage, mood: Mood, now: number, compacts: number,
     : x.task ?? MOOD_TEXT[mood]
 
   const cost = u.cost === undefined ? []
-    : [`custo      $${u.cost.toFixed(2)}${x.last ? ` (+$${x.last.toFixed(2)})` : ''}${x.today ? ` · hoje $${x.today.toFixed(2)}` : ''}`]
+    : [`custo      $${u.cost.toFixed(2)}${x.today ? ` · hoje $${x.today.toFixed(2)}` : ''}`]
+  const last = x.last && spendText(x.last)
 
   return [
     head,
-    `contexto   ${bar(t * 100)} ${k(u.tokens)}/${k(COMPACT_AT)}`,
+    `contexto   ${bar(t * 100)} ${k(u.tokens)}/${k(WINDOW)}`,
     compacts > 0 ? `${compact} · ${compacts}× hoje` : compact,
     u.five === undefined
       ? 'energia 5h ♡♡♡♡♡ sem leitura ainda'
       : `energia 5h ${hearts(u.five)} ${Math.round(u.five)}%${x.fiveWarn ?? eta(u.fiveResets, now)}`,
     u.week === undefined ? 'semana     ▱▱▱▱▱▱▱▱▱▱ —' : `semana     ${bar(u.week)} ${Math.round(u.week)}%`,
     ...cost,
+    ...(last ? [`último     ${last}`] : []),
   ]
 }
 
