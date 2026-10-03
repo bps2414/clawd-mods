@@ -1,6 +1,7 @@
 // claude plugin test: the band draws a valid tree on both surfaces
 import { expect, mock, test } from 'claude-code/testing'
 
+import { IDLE, miniAct, miniSvg } from './mini'
 import { CACHE_TTL, hudLines, setCompactAt, spendText } from './scene'
 
 const BAND = { plugin: 'cloud-pet', component: 'AbovePrompt', props: { hasSurvey: false, maxRows: 14, bodyColumns: 100 } } as const
@@ -54,4 +55,13 @@ test('the cache row counts down, warns, then says what the next message costs', 
   expect(rows(CACHE_TTL)).toMatch(/cache +▰{10} 1h00/)
   expect(rows(8 * 60_000)).toMatch(/cache[^\n]*8min\n +⚠ esfria logo/)
   expect(rows(0)).toMatch(/cache +▱+ expirou\n +próxima msg relê ~71k[\s\S]*\/clear/)
+})
+
+test('every one-line pose draws', () => {
+  for (const act of [...IDLE, 'laptop', 'wave', 'think', 'cheer', 'sad', 'dizzy', 'dead'] as const) {
+    for (const f of [0, 3, 9, 41]) expect(miniSvg(act, f)).toContain('<rect')
+  }
+  expect(miniAct('work', 'calm', 0)).toBe('laptop')
+  expect(miniAct(undefined, 'dead', 0)).toBe('dead')
+  expect(miniAct(undefined, 'calm', 0)).toBe(IDLE[0])
 })

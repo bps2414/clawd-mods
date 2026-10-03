@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Day, PetUsage } from '../types'
-import { CACHE_TTL, COMPACT_AT, WINDOW, setCompactAt, spendText, MOOD_ICON, PET_W, hudLines, moodFor, paintScene, petRect, span, squaresAt, miniSvg, toCells, toSvg, trackX, wanderX } from './scene'
+import { CACHE_TTL, COMPACT_AT, WINDOW, setCompactAt, spendText, MOOD_ICON, PET_W, hudLines, moodFor, paintScene, petRect, span, squaresAt, toCells, toSvg, trackX, wanderX } from './scene'
+import { miniAct, miniSvg } from './mini'
 import type { Scene, TaskPhase, TurnSpend } from './scene'
 
 const usage = atom({ plugin: 'cloud-pet', key: 'usage' } as const, { tokens: 0 } as PetUsage)
@@ -343,7 +344,7 @@ export const register: Register = on => {
       step($)
       if (isHidden) return
       if (isMini) {
-        if (frame % 4 === 0) $.ui.invalidate('ui.render') // the little rod and blink move about twice a second, not per frame
+        if (frame % 2 === 0) $.ui.invalidate('ui.render') // the little one moves about three times a second, not per frame
         return
       }
       if (isTerminal && bandId) {
@@ -573,7 +574,7 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="row" alignItems="center">
-          <Svg source={miniSvg(frame)} alt="Clawd fishing" width={28} height={18} />
+          <Svg source={miniSvg(miniAct(phaseNow(), mood, frame), frame)} alt="Clawd" width={60} height={30} />
           <Box marginLeft={1}><Text dimColor wrap="truncate-end">{text}</Text></Box>
         </Box>
       )

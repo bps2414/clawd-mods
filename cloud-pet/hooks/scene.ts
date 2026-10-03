@@ -695,30 +695,3 @@ export const toSvg = (px: Uint32Array, W: number, PH: number): string => {
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${PH}" shape-rendering="crispEdges">${rects.join('')}</svg>`
 }
-
-// ---- the one-line pet: Clawd as the app draws it on a fresh session, rod in hand ----
-
-// 14x9 art px: O body, K eyes, G rod. The rod tip bobs between ROD[0] and ROD[1]; the eyes close for a beat.
-const MINI = [
-  '..............',
-  '.GGGOOOOOOOO..',
-  '.GGGOOOOOOOO..',
-  '..OOOKOOOOKO..',
-  '..OOOOOOOOOOOO',
-  '...OOOOOOOOOOO',
-  '....OOOOOOOO..',
-  '....O.O..O.O..',
-  '....O.O..O.O..',
-]
-const ROD = ['...G..........', '..GG..........']
-
-/** The pet at 2 px per art px, 28x18 css px, for a text line to carry. */
-export const miniSvg = (frame: number): string => {
-  const g = MINI.map(r => r.split(''))
-  g[0] = ROD[Math.floor(frame / 3) % 2].split('')
-  if (frame % 7 === 0) g[3][5] = g[3][10] = 'O' // blink
-  const fill: Record<string, string> = { O: hex(PALETTE.O), K: hex(PALETTE.K), G: '#9a9a9a' }
-  const rects = g.flatMap((row, y) => row.flatMap((ch, x) => (fill[ch] ? [`<rect x="${x}" y="${y}" width="1" height="1" fill="${fill[ch]}"/>`] : [])))
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 9" shape-rendering="crispEdges">${rects.join('')}</svg>`
-}
