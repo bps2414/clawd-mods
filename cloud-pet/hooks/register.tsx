@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Day, PetUsage } from '../types'
-import { CACHE_TTL, COMPACT_AT, WINDOW, setCompactAt, spendText, MOOD_ICON, PET_W, hudLines, moodFor, paintScene, petRect, span, squaresAt, toCells, toSvg, trackX, wanderX } from './scene'
+import { CACHE_TTL, COMPACT_AT, WINDOW, setCompactAt, spendText, MOOD_ICON, PET_W, hudLines, moodFor, paintScene, petRect, span, squaresAt, miniSvg, toCells, toSvg, trackX, wanderX } from './scene'
 import type { Scene, TaskPhase, TurnSpend } from './scene'
 
 const usage = atom({ plugin: 'cloud-pet', key: 'usage' } as const, { tokens: 0 } as PetUsage)
@@ -341,7 +341,11 @@ export const register: Register = on => {
     let isBlitting = false // a blit still in flight: its tick is skipped, so a slow terminal never queues frames
     $.clock.every(TICK, async () => {
       step($)
-      if (isHidden || isMini) return // one text line has nothing to animate per frame
+      if (isHidden) return
+      if (isMini) {
+        if (frame % 4 === 0) $.ui.invalidate('ui.render') // the little rod and blink move about twice a second, not per frame
+        return
+      }
       if (isTerminal && bandId) {
         if (isBlitting) return
         isBlitting = true
@@ -559,9 +563,20 @@ export const register: Register = on => {
     if (sayLeft > 0) groups[0] = [say]
     const lines = groups.flat()
     if (isMini) {
-      const { Text } = $.ui.resolve(e)
+      const text = `${MOOD_ICON[mood]} ${lines[0]} · ${Math.round(u.tokens / 1000)}k/${Math.round(WINDOW / 1000)}k${u.five === undefined ? '' : ` · 5h ${Math.round(u.five)}%`}`
+      if (e.surface === 'terminal') {
+        const { Box, Text } = $.ui.resolve(e)
 
-      return <Text dimColor wrap="truncate-end">{MOOD_ICON[mood]} {lines[0]} · {Math.round(u.tokens / 1000)}k/{Math.round(WINDOW / 1000)}k{u.five === undefined ? '' : ` · 5h ${Math.round(u.five)}%`}</Text>
+        return <Box><Text color="#d97757">▐▛█▜▌ </Text><Text dimColor wrap="truncate-end">{text}</Text></Box>
+      }
+      const { Box, Text, Svg } = $.ui.resolve(e)
+
+      return (
+        <Box flexDirection="row" alignItems="center">
+          <Svg source={miniSvg(frame)} alt="Clawd fishing" width={28} height={18} />
+          <Box marginLeft={1}><Text dimColor wrap="truncate-end">{text}</Text></Box>
+        </Box>
+      )
     }
     const hasSide = bodyColumns >= 64
     const W = hasSide ? clamp(bodyColumns - 36, 24, 44) : clamp(bodyColumns - 2, 20, 44)

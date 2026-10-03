@@ -92,7 +92,7 @@ Guarda por dia: turnos, tempo, custo, compactações e mortes (últimos 30 dias)
 | Comando | Faz |
 |---|---|
 | `/pet` | esconde / mostra |
-| `/pet mini` | encolhe o pet numa linha só / expande de volta |
+| `/pet mini` | encolhe o pet numa linha só (Clawd pescando + status) / expande de volta |
 | `/pet som` | liga / desliga o som |
 | `/pet stats` | diário dos últimos 7 dias |
 | `/pet fuso -3` | acerta o fuso do céu, se a hora estiver errada |
