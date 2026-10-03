@@ -60,7 +60,10 @@ const clawd = (g: Grid, o: { eyes?: Eyes; dy?: number; armL?: Arm; armR?: Arm })
     case 'shut': at(1, 6, 'E'); break
     case 'blink': break
     case 'happy': both(c => { put(g, eyeRow - 1, c, 'K'); put(g, eyeRow, c - 1, 'K'); put(g, eyeRow, c + 1, 'K') }); break
-    case 'x': both(c => { put(g, eyeRow - 1, c - 1, 'K'); put(g, eyeRow - 1, c + 1, 'K'); put(g, eyeRow, c, 'K'); put(g, eyeRow + 1, c - 1, 'K'); put(g, eyeRow + 1, c + 1, 'K') }); break
+    case 'x': both(c => { // ><, squeezed shut: reads at this size where a 3x3 cross is just noise
+      const dir = c < BX + 4 ? 1 : -1 // left eye points right, right eye points left
+      put(g, eyeRow - 1, c - dir, 'K'); put(g, eyeRow, c, 'K'); put(g, eyeRow + 1, c - dir, 'K')
+    }); break
   }
 
   const arm = (side: 'L' | 'R', a: Arm) => {
@@ -101,13 +104,13 @@ const ACTS: Record<MiniAct, (g: Grid, t: number) => void> = {
   coffee(g, t) {
     const sip = t % 30 >= 24
     clawd(g, { armR: 'none', eyes: sip ? 'shut' : 'open' })
-    const lift = sip ? -1 : 0
-    rect(g, BY + 5, BX + 8, 2, 2, 'O')
-    rect(g, BY + 2 + lift, BX + 8, 2, 2, 'W')
-    put(g, BY + 2 + lift, BX + 10, 'W')
-    put(g, BY + 3 + lift, BX + 10, 'W')
-    rect(g, BY + 4 + lift, BX + 8, 1, 2, 'O')
-    put(g, BY + 3 + lift - 2 - (Math.floor(t / 3) % 2), BX + 8 + (Math.floor(t / 6) % 2), 'G')
+    const top = BY - (sip ? 1 : 0) // the mug rises to his face
+    rect(g, top + 3, BX + 8, 2, 2, 'O') // the hand under it
+    rect(g, top, BX + 8, 3, 3, 'W')
+    put(g, top, BX + 9, 'T') // coffee at the rim
+    ;[[0, 11], [1, 12], [2, 11]].forEach(([r, c]) => put(g, top + r, BX + c, 'W')) // handle
+    const wisp = Math.floor(t / 3) % 2
+    put(g, Math.max(0, top - 1 - wisp), BX + 8 + wisp * 2, 'G')
   },
   // eyes shut, the z's float up
   sleep(g, t) {
