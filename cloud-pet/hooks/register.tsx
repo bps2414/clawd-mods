@@ -22,6 +22,7 @@ let shown = 0 // weather intensity, eased toward tokens / COMPACT_AT so the sky 
 let frame = 0
 let cheer = 0
 let isHidden = false
+let isMini = false // collapsed to one text line
 let isTerminal = false
 let bandId: string | undefined // the AbovePrompt render instance the timer blits into
 let size = { W: 40, PH: 20 }
@@ -320,7 +321,7 @@ const step = ($: EngineInterface) => {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'pet', description: 'Clawd: mostra/esconde, som, diário e fuso', argumentHint: '[som | stats | fuso N]' })
+    await $.command.register({ name: 'pet', description: 'Clawd: mostra/esconde, som, diário e fuso', argumentHint: '[mini | som | stats | fuso N]' })
     nowMs = await $.clock.now()
     isMuted = (await $.store.get('muted')) === true
     const tz = await $.store.get('tz')
@@ -330,6 +331,7 @@ export const register: Register = on => {
     todayKey = dateKey(nowMs)
     today = { ...NO_DAY, ...(await readDays($))[todayKey] }
     isHidden = (await $.store.get('hidden')) === true
+    isMini = (await $.store.get('mini')) === true
 
     void pollThreshold($)
     $.clock.every(60_000, () => void pollThreshold($))
@@ -339,7 +341,7 @@ export const register: Register = on => {
     let isBlitting = false // a blit still in flight: its tick is skipped, so a slow terminal never queues frames
     $.clock.every(TICK, async () => {
       step($)
-      if (isHidden) return
+      if (isHidden || isMini) return // one text line has nothing to animate per frame
       if (isTerminal && bandId) {
         if (isBlitting) return
         isBlitting = true
@@ -365,6 +367,13 @@ export const register: Register = on => {
       if (!isMuted) void ring($, DONE, 'Clawd')
 
       return { text: isMuted ? 'Clawd no mudo. /pet som liga de novo.' : 'Som ligado: Clawd toca quando um turno longo termina ou fica te esperando.' }
+    }
+    if (verb === 'mini') {
+      isMini = !isMini
+      await $.store.set('mini', isMini)
+      $.ui.invalidate('ui.render')
+
+      return { text: isMini ? 'Clawd encolhido numa linha. /pet mini expande de novo.' : 'Clawd expandido.' }
     }
     if (verb === 'stats') return { text: await stats($) }
     if (verb === 'fuso') {
@@ -539,7 +548,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { hasSurvey, maxRows, bodyColumns } = e.props
     const rows = Math.min(12, maxRows - 2)
-    if (isHidden || hasSurvey || rows < 6) return next(e)
+    if (isHidden || hasSurvey || (!isMini && rows < 6)) return next(e)
 
     const u = await read($, usage)
     await read($, compacts) // subscribes: a compaction redraws the band
@@ -549,6 +558,11 @@ export const register: Register = on => {
     const groups = hudLines(u, mood, now, count, { task: taskHead(), fiveWarn, last: lastSpend, today: today.cost, cacheLeft: cacheLeft() })
     if (sayLeft > 0) groups[0] = [say]
     const lines = groups.flat()
+    if (isMini) {
+      const { Text } = $.ui.resolve(e)
+
+      return <Text dimColor wrap="truncate-end">{MOOD_ICON[mood]} {lines[0]} · {Math.round(u.tokens / 1000)}k/{Math.round(WINDOW / 1000)}k{u.five === undefined ? '' : ` · 5h ${Math.round(u.five)}%`}</Text>
+    }
     const hasSide = bodyColumns >= 64
     const W = hasSide ? clamp(bodyColumns - 36, 24, 44) : clamp(bodyColumns - 2, 20, 44)
     size = { W, PH: rows * 2 }
